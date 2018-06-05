@@ -1,6 +1,6 @@
-/* eslint-disable no-console */
 
-const redis = require('redis');
+let Promise = require('bluebird');
+let redis = Promise.promisifyAll(require('redis'));
 
 const config = {
   port: 6379, // Port of your locally running Redis server
@@ -39,21 +39,39 @@ function genIsValid(generator) {
   });
 }
 
+var active = client.getAsync('active_gen').then(function(result){   // check that gen is valid instead of genIsValid func
+  return result === 'active';
+});
+//console.log(active); // should be a promise
 
-// const tToRun = 100000;
-const tToRun = 100;
+const tToRun = 100;     // we use iterators not to hang the machine when trying to process 1kk of messages
 let i = 0;
 const timerId = setInterval(() => {
   i++;
   if (i >= tToRun) return 0;
-  const gen = genIsValid(client);
-  if (gen) {
-    client.set('active_gen', 'active', 'EX', 5);
-    const message = newMessage(40);
-    client.rpush('to_process', message);
-    console.log(`message is  ${message}`);
-
-  }
-  else { console.log(gen); }
-
+  const gen = active.then(function(isValid){
+    if (!isValid) return isValid;
+    else{
+      const message = newMessage(40);
+      console.log(`message is  ${message}`);
+      return client.rpushAsync('to_process', message);
+    }
+  });
 }, 500);
+
+
+/* It is said to a correct for promise loop
+var promiseFor = Promise.method(function(condition, action, value) {
+    if (!condition(value)) return value;
+    return action(value).then(promiseFor.bind(null, condition, action));
+});
+
+promiseFor(function(count) {
+    return count < 10;
+}, function(count) {
+    return db.getUser(email)
+             .then(function(res) { 
+                 logger.log(res); 
+                 return ++count;
+             });
+}, 0).then(console.log.bind(console, 'all done')); */

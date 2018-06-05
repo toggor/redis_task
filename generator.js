@@ -24,19 +24,8 @@
 class protoApp {
   constructor() {
     this.appStatus = 'new_app';
-    this.appId = this.genAppId();
     this.db = {}; // object should contain redis credentials
     this.registerApp();
-  }
-
-  registerApp() {
-    const id = this.appId;
-    // check if appId is not already taken
-    // add this to app list in redis
-  }
-
-  genAppId() {
-    // should create new random appId
   }
 
   generateMsg() {
@@ -60,7 +49,6 @@ class protoApp {
     // for the processor
     //      - get the message from (to_process)
     //      - processMsg(message)
-    // maybe we need something to control if the processors are alive
   }
 
   // other things: setter for DB params
@@ -96,3 +84,5 @@ function dealWithErrors() {
 // - do the job redApp.work()
 // Maybe check the signals from outside in case we have to stop
 // process Errors if we face any
+
+
