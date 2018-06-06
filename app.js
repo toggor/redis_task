@@ -56,7 +56,7 @@ function actProcessor(processor) {
     processor.blpop('to_process', 0, (err, reply) => {
       if (Math.random() >= 0.95) {
         colorLog('Probability 5% triggered', processor.myAppType);
-        processor.lpush('corrupted', reply[1], redis.print);
+        processor.lpush('corrupted', reply[1]);
       } else {
         processor.lpush('processed', reply[1]);
         colorLog(`processed  + ${reply[1]}`, processor.myAppType);
@@ -74,15 +74,18 @@ setInterval(() => {
     if (client.myAppType === 'processor') {
       client.llen('processed', (err, genMsgs) => {
         colorLog(`processed so far ${genMsgs}`);
-        if (genMsgs >= maxMsgs) client.quit();
+        if (genMsgs >= maxMsgs) {          
+          client.quit();
+        }
+        actProcessor(client);
       });
-      actProcessor(client);
     } else if (client.myAppType === 'generator') {
       client.get('generated', (err, generated) => {
         colorLog(`generated so far ${generated}`);
       });
       actGenerator(client);
     }
+    else throw new Error(`Expected 'processor or 'generator' but got ${client.myAppType}`);
 //  });
 }, 0);
 
