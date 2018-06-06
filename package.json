@@ -1,0 +1,36 @@
+{
+  "name": "redis_task",
+  "version": "1.0.0",
+  "description": "task to process messages using redis",
+  "main": "app.js",
+  "dependencies": {
+    "bluebird": "^3.5.1",
+    "colors": "^1.3.0",
+    "redis": "^2.8.0"
+  },
+  "devDependencies": {
+    "eslint": "^4.19.1",
+    "eslint-config-airbnb-base": "^12.1.0",
+    "eslint-plugin-import": "^2.12.0",
+    "eslint-plugin-promise": "^3.8.0",
+    "eslint-plugin-standard": "^3.1.0",
+    "mocha": "^5.2.0"
+  },
+  "scripts": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/toggor/redis_task.git"
+  },
+  "keywords": [
+    "redis",
+    "test_task"
+  ],
+  "author": "toggor",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/toggor/redis_task/issues"
+  },
+  "homepage": "https://github.com/toggor/redis_task#readme"
+}

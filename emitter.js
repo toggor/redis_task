@@ -10,6 +10,8 @@ const config = {
 const client = redis.createClient(config);
 client.set('active_gen', 'active', 'EX', 5);
 
+redis.prototype.appType = 'new_app';
+
 /**
  * RANDOM STRING GENERATOR
  *
