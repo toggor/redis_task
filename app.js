@@ -2,7 +2,7 @@
 
 const redis = require('redis'),
   colors = require('colors'),
-  maxMsgs = 1000,
+  maxMsgs = 100000,
   config = {
     port: 6379, // Port of your locally running Redis server
     host: '127.0.0.1', // Redis server host, defaults to 127.0.0.1
@@ -70,6 +70,7 @@ function actProcessor(processor) {
     }
     processor.blpop('to_process', 0, (err, reply) => {
       // if generator is present - we block and pop records from 'to_process' queue and push them to 'processed' or 'corrupted'
+      colorLog(reply.toString);
       if (Math.random() >= 0.95) {
         colorLog('Probability 5% triggered', processor.myAppType);
         processor.lpush('corrupted', reply[1]);
@@ -87,26 +88,29 @@ client.on('error', (err) => {
 
 const setIntervalId = setInterval(() => {
   //  client.on('idle', () => {
-  if (client.myAppType === 'processor') {
+    if (client.myAppType === 'generator') {
+      client.get('generated', (err, generated) => {
+        colorLog(`generated so far ${generated}`);
+        if (generated >= maxMsgs*1.1) {
+          client.quit();
+          colorLog(`reached max Generated`);
+          clearInterval(setIntervalId);
+        }
+      });
+      actGenerator(client);
+    } //else throw new Error(`Expected 'processor or 'generator' but got ${client.myAppType}`);
+  else if (client.myAppType === 'processor') {
     client.llen('processed', (err, genMsgs) => {
       colorLog(`processed so far ${genMsgs}`);
       if (genMsgs >= maxMsgs) {
         // if Max number of processed messages reached we stop processing
+        colorLog('reached max Processed');
         client.quit();
         clearInterval(setIntervalId);
       }
       actProcessor(client);
     });
-  } else if (client.myAppType === 'generator') {
-    client.get('generated', (err, generated) => {
-      colorLog(`generated so far ${generated}`);
-      if (generated => maxMsgs * 1.1) {
-        client.quit();
-        clearInterval(setIntervalId);
-      }
-    });
-    actGenerator(client);
-  } else throw new Error(`Expected 'processor or 'generator' but got ${client.myAppType}`);
+  }
   //  });
 }, 0);
 
