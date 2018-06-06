@@ -1,8 +1,9 @@
-
 /* eslint-disable no-console */
 
 const Promise = require('bluebird');
-const redis = Promise.promisifyAll(require('redis'));
+const redis = require('redis');
+
+Promise.promisifyAll(redis);
 
 const config = {
   port: 6379, // Port of your locally running Redis server
@@ -10,8 +11,8 @@ const config = {
 };
 
 const client = redis.createClient(config);
-client.set('active_gen', 'active', 'EX', 5);
-//client.prototype.myAppType = 'new_app';
+console.log(client.toString());
+// client.prototype.myAppType = 'new_app';
 /**
  * RANDOM STRING GENERATOR
  *
@@ -28,55 +29,73 @@ function newMessage(len, an) {
       i = 0;
   const min = an === 'a' ? 10 : 0,
         max = an === 'n' ? 10 : 62;
-  for (;i++ < len;) {
+  for (; i++ < len;) {
     let r = Math.random() * (max - min) + min << 0;
     // str += String.fromCharCode(r += r > 9 ? r < 36 ? 55 : 61 : 48);
-    if (r > 9) { if (r < 36) { r += 55; } else { r += 61; } } else { r += 48; }
+    if (r > 9) {
+      if (r < 36) {
+        r += 55;
+      } else {
+        r += 61;
+      }
+    } else {
+      r += 48;
+    }
     str += String.fromCharCode(r);
   }
   return str;
 }
 
 function genIsValid(generator) {
-  return generator.getAsync('active_gen').then((result) => {   // check that gen is valid instead of genIsValid func
+  return generator.getAsync('active_gen').then((result) => { // check that gen is valid instead of genIsValid func
     return result === 'active';
   });
 }
 
-/* const active = client.getAsync('active_gen').then((result) => {   // check that gen is valid instead of genIsValid func
-  return result === 'active';
-});*/
-// console.log(active); // should be a promise
 
-const tToRun = 10;     // we use iterators not to hang the machine when trying to process 1kk of messages
+function pActGenerator(generator) {
+  generator.setAsync('active_gen', 'active', 'EX', 5);
+  generator.incrAsync('generated');
+  generator.rpushAsync('to_process', newMessage(5));
+  // colorLog(`message is  ${message}`, client.myAppType);
+}
+
+function pActProcessor(processor) {
+  genIsValid(processor).then((isActive) => {
+    if (isActive !== 'active') pActGenerator(processor);
+    return processor.blpopAsync('to_process', 0)
+      .then((reply) => {
+        if (Math.random() >= 0.95) {
+          console.log(`Probability 5% triggered for ${reply[1]}`);
+          processor.lpushAsync('corrupted', reply[1]);
+        }
+        console.log(`processed  + ${reply[1]}`);
+        processor.lpushAsync('processed', reply[1]);
+      }).catch((err)=>{
+        console.log(`Error in actProcessor blocking POP ${err.toString()}`);
+      });
+  }).catch((err)=>{
+    console.log(`Error in actProcessor genIsValid ${err.toString()}`);
+  });
+}
+
+const tToRun = 10; // we use iterators not to hang the machine when trying to process 1kk of messages
 let i = 0;
-const timerId = setInterval(() => {
+
+function run(worker) {
   i++;
   if (i >= tToRun) return 0;
-  const gen = genIsValid(client).then((isValid) => {
-    if (!isValid) return isValid;
+  return genIsValid(worker).then((isActive) => { // check that gen is valid instead of genIsValid func
+    if (isActive) return Promise.delay(500).pActGenerator(worker);
+    return pActProcessor(worker);
+  })
+    .then(() => {
+      setImmediate(run);
+    })
+    .catch((err) => {
+      console.log(`Smth bad happened: ${err.toString()}`);
+      setImmediate(run);
+    });
+}
 
-    const message = newMessage(40);
-    console.log(`message is  ${message}`);
-    console.log(`message is  ${Object.getPrototypeOf(client).toString}`);
-    return client.rpushAsync('to_process', message);
-
-  });
-}, 500);
-
-
-/* It is said to a correct for promise loop
-var promiseFor = Promise.method(function(condition, action, value) {
-    if (!condition(value)) return value;
-    return action(value).then(promiseFor.bind(null, condition, action));
-});
-
-promiseFor(function(count) {
-    return count < 10;
-}, function(count) {
-    return db.getUser(email)
-             .then(function(res) {
-                 logger.log(res);
-                 return ++count;
-             });
-}, 0).then(console.log.bind(console, 'all done')); */
+const r = run(client);
