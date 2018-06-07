@@ -1,15 +1,23 @@
 /* eslint-disable no-console */
 
-const redis = require('redis'),
-      colors = require('colors'),
-      maxMsgs = 100000,
-      config = {
-        port: 6379, // Port of your locally running Redis server
-        host: '127.0.0.1', // Redis server host, defaults to 127.0.0.1
-      },
-      worker = redis.createClient(config);
+const Promise = require('bluebird');
+const redis = require('redis');
+const color = require('colors');
 
-worker.myAppType = 'pocessor';
+Promise.promisifyAll(redis);
+
+const config = {
+  port: 6379, // Port of Redis server
+  host: '127.0.0.1', // Redis server host
+};
+const client = redis.createClient(config);
+
+/**
+ * Param setters for action type and client name
+ */
+client.setActionType = function setActionType(type) { this.myActionType = type; };
+client.setAppName = function setAppName(name) { this.appName = name; };
+
 /**
  * This generates a random string
  * @param {Integer} len is an output message length
@@ -32,101 +40,154 @@ function newMessage(len) {
   }
   return str;
 }
+
 /**
  * Colored output to see who is who
- * @param {*} message  to color
+ * @param {*} message  text to be colored
  * @param {*} type  generator, processor or system
- * if no type - system by default color = white
+ * by default color = white
  */
 function colorLog(message, type) {
   if (type === undefined) console.log(`${message}`);
-  else if (type === 'generator') console.log(colors.green(`${message}`));
-  else if (type === 'processor') console.log(colors.blue(`${message}`));
+  else if (type === 'generator') console.log(color.green(`${message}`));
+  else if (type === 'processor') console.log(color.blue(`${message}`));
 }
 
 /**
- *
- * @param {redis.Client} generator we pass a redis client and do what generator should do
+ * Return true if generator is active
+ * @param {redis client} generator we pass a redis client
  */
-function actGenerator(generator) {
-  // update the active generator record TTL, create message for processor and push it to 'to_process'
-  generator.set('active_gen', 'active', 'EX', 5);
-  const message = newMessage(5);
-  generator.incr('generated');
-  generator.rpush('to_process', message);
-  colorLog(`message is  ${message}`, client.myAppType);
+function genIsValid(generator) {
+  return generator.getAsync('active_gen').then((result) => { // check that gen is valid instead of genIsValid func
+    return result === 'active';
+  });
 }
 
 /**
- *
- * @param {redis.Client} processor we pass a redis client and do what processor should do
+ * Do what generator does
+ * @param {redis client} generator we pass a redis client
+ * update TTL of the active_gen record
+ * generate message then push it to 'to_process' queue
+ * increase generated iterator
  */
-function actProcessor(processor) {
-  processor.blpop('to_process', 0, (err, reply) => {
-    // if generator is present - we block and pop records from 'to_process' queue and push them to 'processed' or 'corrupted'
-    colorLog(reply.toString);
-    if (Math.random() >= 0.95) {
-      colorLog('Probability 5% triggered', processor.myAppType);
-      processor.lpush('corrupted', reply[1]);
-    } else {
-      processor.lpush('processed', reply[1]);
-      colorLog(`processed  + ${reply[1]}`, processor.myAppType);
-    }
-  });
+function pActGenerator(generator) {
+  return generator.setAsync('active_gen', 'active', 'EX', 2)
+    .then(()=>{
+      const message = newMessage(5);
+      generator.rpushAsync('to_process', message);
+      generator.setActionType('generator');
+      colorLog(`message pushed ${message}`, client.myActionType); })
+    .then(generator.incrAsync('generated'))
+    .catch((err)=>{
+      console.log(`Error in actGenerator ${err.toString()}`);
+    });
 }
 
-worker.on('error', (err) => {
-  colorLog(`error event - ${client.host} : ${client.port} - ${err}`);
-});
-
-
-function run(client) {
-
-  client.get('active_gen', (err, reply) => {
-    if (reply !== 'active') {
-      client.set('active_gen', 'active', 'EX', 5);
-      client.myAppType = 'generator';
-    }
-    else {
-      client.myAppType = 'pocessor';     
-    }
+/**
+ * Do what processor does
+ * @param {redis client} processor we pass a redis client
+ * we use the blocking pop to make processors work one by one
+ * if we got in 5% range we put a message into 'corrupted' queue
+ * else we put a message into 'processed' queue
+ */
+function pActProcessor(processor) {
+  return processor.llenAsync('to_process').then((qsize)=>{  // check the 'to_process' queue not to block all clients
+    if (qsize < 1) return Promise.resolve();
+    return processor.blpopAsync('to_process', 0)
+      .then((reply) => {
+        if (Math.random() >= 0.95) {
+          colorLog(`Probability 5% triggered for ${reply[1]}`);
+          processor.lpushAsync('corrupted', reply[1]);
+        }
+        colorLog(`processed  + ${reply[1]}`, client.myActionType);
+        processor.lpushAsync('processed', reply[1]);
+      });
+  }).catch((err)=>{
+    console.log(`Error in actProcessor blocking POP ${err.toString()}`);
   });
-  if (client.myAppType === 'generator') {
-    client.get('generated', (err, generated) => {
-      colorLog(`generated so far ${generated}`);
-      if (generated >= maxMsgs * 1.1) {
-        client.quit();
-        colorLog('reached max Generated');
-        // clearInterval(setIntervalId);
-      }
-    });
-    actGenerator(client);
-  }
-  else if (client.myAppType === 'processor') {
-    client.llen('processed', (err, genMsgs) => {
-      colorLog(`processed so far ${genMsgs}`);
-      if (genMsgs >= maxMsgs) {
-        // if Max number of processed messages reached we stop processing
-        colorLog('reached max Processed');
-        client.quit();
-      }
-    });
-    actProcessor(client);
-  }
-  setImmediate(run(client));
+}
+/**
+ * Check if our 'worker' is next
+ * if true he takes over if the generator fails
+ * @param {redis client} worker we pass a redis client
+ * we get a list of all connected redis clients
+ * and parse it to get only our clients
+ * then compare if this is the correct worker to become generator
+ */
+function appIsNext(worker) {
+  return worker.clientAsync('list').then((data) => {
+    let res = [];
+    const appQueue = [];
+    res = data.split(/\n(?!$)/); // new lines except ending line, coz its empty
+
+    for (let i = 0; i < res.length; i++) {
+      const temp =  res[i].split(/\b\s/); // spaces after words
+      res[i] = temp;
+    }
+    for (let i = 0; i < res.length; i++) {
+      const temp = res[i][3].split(/=/)[1]; // params look like 'id=23', split on '='
+      if (temp.indexOf('tester_') + 1) appQueue.push(temp); // get only our apps clients names prefixed with 'tester_'
+    }
+    return appQueue;
+  }).then((result)=>{
+    return worker.appName === result[0];
+  }).catch((err) => {
+    console.log(`Error in appIsNext: ${err.toString()}`);
+  });
+
 }
 
-/* worker.on('ready', () => {
-  // by default our clients come as 'processors' but if no generator present - at least one is needed
-  worker.myAppType = 'processor';
-  colorLog('ready');
-  worker.get('active_gen', (err, reply) => {
-    if (reply !== 'active') {
-      worker.myAppType = 'generator';
-      worker.set('active_gen', 'active', 'EX', 5);
-    }
-    return 0;
-  });
+/**
+ * Init our apps with names
+ * @param {redis client} worker we pass a redis client
+ * by default clients connections are unnamed
+ * we name them to be able to distinguish them later
+ */
+function initApp(worker) {
+  const name = `tester_${newMessage(8)}`;
+  worker.setAppName(name);
+  return worker.clientAsync('setname', name);
+}
 
-}); */
-run(worker);
+
+/**
+ * int main void.... almost
+ * @param {redis client} worker we pass a redis client
+ * outer function is to control the execution
+ * and a small hamster running in the wheel
+ *
+ * we init client
+ * check if the generator is present:
+ * generator active and this is a 'generator' - we generate every 500 ms
+ * generator active and this is a 'processor' - we process
+ * no generator - we look who is next in queue, if this is next - become generator
+ */
+function wheel(worker) {
+  initApp(worker);
+  console.log(`Client name: ${worker.appName}`);
+
+  function hamster() {
+    return genIsValid(worker).then((isActive) => { // check that gen is valid instead of genIsValid func
+      if (isActive) {
+        if (worker.myActionType === 'generator') {
+          console.log(color.yellow(`generator is ${isActive}`));
+          return Promise.delay(500).then(pActGenerator(worker));
+        }
+        return pActProcessor(worker);
+      }
+      return  appIsNext(worker).then((isNext)=>{
+        if (isNext) pActGenerator(worker);
+      });
+    })
+      .then(() => {
+        setImmediate(hamster);
+      })
+      .catch((err) => {
+        console.log(`Smth bad happened: ${err.toString()}`);
+        setImmediate(hamster);
+      });
+  }
+  hamster();
+}
+
+wheel(client);

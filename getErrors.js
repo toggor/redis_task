@@ -4,6 +4,12 @@ const redis = Promise.promisifyAll(require('redis'));
 
 const client = redis.createClient();
 
+/**
+ * As in task we do the following:
+ * get the messages with errors
+ * display them
+ * then delete
+ */
 console.log('getErrors call accepted');
 client.llenAsync('corrupted')
   .then((num)=> {
@@ -15,7 +21,6 @@ client.llenAsync('corrupted')
       console.log(data[i]);
     }
   })
-  .delay(2000)// wait for console output
   .then(()=> {
     console.log('Corrupted messages deleted');
     return client.del('corrupted');
