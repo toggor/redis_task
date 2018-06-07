@@ -51,6 +51,7 @@ function colorLog(message, type) {
   if (type === undefined) console.log(`${message}`);
   else if (type === 'generator') console.log(color.green(`${message}`));
   else if (type === 'processor') console.log(color.blue(`${message}`));
+  else if (type === 'error') console.log(color.red(`${message}`));
 }
 
 /**
@@ -79,7 +80,7 @@ function pActGenerator(generator) {
       colorLog(`message pushed ${message}`, client.myActionType); })
     .then(generator.incrAsync('generated'))
     .catch((err)=>{
-      console.log(`Error in actGenerator ${err.toString()}`);
+      colorLog(`Error in actGenerator ${err.toString()}`, 'error');
     });
 }
 
@@ -95,6 +96,7 @@ function pActProcessor(processor) {
     if (qsize < 1) return Promise.resolve();
     return processor.blpopAsync('to_process', 0)
       .then((reply) => {
+        processor.setActionType('processor');
         if (Math.random() >= 0.95) {
           colorLog(`Probability 5% triggered for ${reply[1]}`);
           processor.lpushAsync('corrupted', reply[1]);
@@ -103,7 +105,7 @@ function pActProcessor(processor) {
         processor.lpushAsync('processed', reply[1]);
       });
   }).catch((err)=>{
-    console.log(`Error in actProcessor blocking POP ${err.toString()}`);
+    colorLog(`Error in actProcessor blocking POP ${err.toString()}`, 'error');
   });
 }
 /**
@@ -132,7 +134,7 @@ function appIsNext(worker) {
   }).then((result)=>{
     return worker.appName === result[0];
   }).catch((err) => {
-    console.log(`Error in appIsNext: ${err.toString()}`);
+    colorLog(`Error in appIsNext: ${err.toString()}`, 'error');
   });
 
 }
@@ -164,13 +166,13 @@ function initApp(worker) {
  */
 function wheel(worker) {
   initApp(worker);
-  console.log(`Client name: ${worker.appName}`);
+  colorLog(`Client name: ${worker.appName}`);
 
   function hamster() {
     return genIsValid(worker).then((isActive) => { // check that gen is valid instead of genIsValid func
       if (isActive) {
         if (worker.myActionType === 'generator') {
-          console.log(color.yellow(`generator is ${isActive}`));
+          colorLog(`generator is ${isActive}`);
           return Promise.delay(500).then(pActGenerator(worker));
         }
         return pActProcessor(worker);
@@ -183,7 +185,7 @@ function wheel(worker) {
         setImmediate(hamster);
       })
       .catch((err) => {
-        console.log(`Smth bad happened: ${err.toString()}`);
+        colorLog(`Look! An error: ${err.toString()}`, 'error');
         setImmediate(hamster);
       });
   }
