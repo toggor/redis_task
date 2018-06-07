@@ -2,6 +2,7 @@
 
 const Promise = require('bluebird');
 const redis = require('redis');
+const color = require('colors');
 
 Promise.promisifyAll(redis);
 
@@ -11,27 +12,19 @@ const config = {
 };
 
 const client = redis.createClient(config);
-console.log(client.toString());
-// client.prototype.myAppType = 'new_app';
+
+client.setActionType = function (type) { this.myActionType = type; };
+client.setAppName = function (name) { this.appName = name; };
+
 /**
- * RANDOM STRING GENERATOR
- *
- * Info:      http://stackoverflow.com/a/27872144/383904
- * Use:       randomString(length [,"A"] [,"N"] );
- * Default:   return a random alpha-numeric string
- * Arguments: If you use the optional "A", "N" flags:
- *            "A" (Alpha flag)   return random a-Z string
- *            "N" (Numeric flag) return random 0-9 string
+ * This generates a random string
+ * @param {Integer} len is an output message length
  */
-function newMessage(len, an) {
-  an = an && an.toLowerCase();
-  let str = '',
-      i = 0;
-  const min = an === 'a' ? 10 : 0,
-        max = an === 'n' ? 10 : 62;
-  for (; i++ < len;) {
-    let r = Math.random() * (max - min) + min << 0;
-    // str += String.fromCharCode(r += r > 9 ? r < 36 ? 55 : 61 : 48);
+function newMessage(len) {
+  let str = '';
+  const max = 62;
+  for (let i = 0; i < len; i++) {
+    let r = Math.floor(Math.random() * max);
     if (r > 9) {
       if (r < 36) {
         r += 55;
@@ -45,6 +38,17 @@ function newMessage(len, an) {
   }
   return str;
 }
+/**
+ * Colored output to see who is who
+ * @param {*} message  to color
+ * @param {*} type  generator, processor or system
+ * if no type - system by default color = white
+ */
+function colorLog(message, type) {
+  if (type === undefined) console.log(`${message}`);
+  else if (type === 'generator') console.log(color.green(`${message}`));
+  else if (type === 'processor') console.log(color.blue(`${message}`));
+}
 
 function genIsValid(generator) {
   return generator.getAsync('active_gen').then((result) => { // check that gen is valid instead of genIsValid func
@@ -54,48 +58,96 @@ function genIsValid(generator) {
 
 
 function pActGenerator(generator) {
-  generator.setAsync('active_gen', 'active', 'EX', 5);
-  generator.incrAsync('generated');
-  generator.rpushAsync('to_process', newMessage(5));
-  // colorLog(`message is  ${message}`, client.myAppType);
+  return generator.setAsync('active_gen', 'active', 'EX', 2)
+    .then(()=>{
+      const message = newMessage(5);
+      generator.rpushAsync('to_process', message);
+      generator.setActionType('generator');
+      colorLog(`message pushed ${message}`, client.myActionType); })
+    .then(generator.incrAsync('generated'))
+    .catch((err)=>{
+      console.log(`Error in actGenerator ${err.toString()}`);
+    });
 }
 
 function pActProcessor(processor) {
-  genIsValid(processor).then((isActive) => {
-    if (isActive !== 'active') pActGenerator(processor);
+  return processor.llenAsync('to_process').then((qsize)=>{  // check the to_process queue not to block all clients
+    if (qsize < 1) return Promise.resolve();
     return processor.blpopAsync('to_process', 0)
       .then((reply) => {
         if (Math.random() >= 0.95) {
           console.log(`Probability 5% triggered for ${reply[1]}`);
           processor.lpushAsync('corrupted', reply[1]);
         }
-        console.log(`processed  + ${reply[1]}`);
+        colorLog(`processed  + ${reply[1]}`, client.myActionType);
         processor.lpushAsync('processed', reply[1]);
-      }).catch((err)=>{
-        console.log(`Error in actProcessor blocking POP ${err.toString()}`);
       });
   }).catch((err)=>{
-    console.log(`Error in actProcessor genIsValid ${err.toString()}`);
+    console.log(`Error in actProcessor blocking POP ${err.toString()}`);
   });
 }
 
-const tToRun = 10; // we use iterators not to hang the machine when trying to process 1kk of messages
-let i = 0;
-
-function run(worker) {
-  i++;
-  if (i >= tToRun) return 0;
-  return genIsValid(worker).then((isActive) => { // check that gen is valid instead of genIsValid func
-    if (isActive) return Promise.delay(500).pActGenerator(worker);
-    return pActProcessor(worker);
-  })
-    .then(() => {
-      setImmediate(run);
-    })
-    .catch((err) => {
-      console.log(`Smth bad happened: ${err.toString()}`);
-      setImmediate(run);
-    });
+function pGenTakeover(worker) {
+  pActGenerator(worker);
 }
 
-const r = run(client);
+function appIsNext(worker) {
+  return worker.clientAsync('list').then((data) => {
+    let res = [];
+    const appQueue = [];
+    res = data.split(/\n(?!$)/); // new lines except ending line, coz its empty
+
+    for (let i = 0; i < res.length; i++) {
+      const temp =  res[i].split(/\b\s/); // spaces after words
+      // each res[i] contains a string with clients params
+      res[i] = temp;
+    }
+    for (let i = 0; i < res.length; i++) {
+      // console.log(`[${i}] ClientID = ${res[i][0].split(/=/)[1]}, ClientName = ${res[i][3].split(/=/)[1]}`);
+      const temp = res[i][3].split(/=/)[1]; // get only our apps clients names prefixed with 'tester_'
+      if (temp.indexOf('tester_') + 1) appQueue.push(temp);
+    }
+    return appQueue;
+  }).then((result)=>{
+    return worker.appName === result[0];
+  }).catch((err) => {
+    console.log(`Error in appIsNext: ${err.toString()}`);
+  });
+
+}
+
+function initApp(worker) {
+  const name = `tester_${newMessage(8)}`;
+  worker.setAppName(name);
+  return worker.clientAsync('setname', name);
+}
+
+function run(worker) {
+  initApp(worker);
+  console.log(`Client name: ${worker.appName}`);
+
+  function start() {
+    return genIsValid(worker).then((isActive) => { // check that gen is valid instead of genIsValid func
+      if (isActive) {
+        if (worker.myActionType === 'generator') {
+          console.log(color.yellow(`generator is ${isActive}`));
+          return Promise.delay(500).then(pActGenerator(worker));
+        }
+        return pActProcessor(worker);
+      }
+      return  appIsNext(worker).then((isNext)=>{
+        if (isNext) pGenTakeover(worker);
+      });
+    })
+      .then(() => {
+        setImmediate(start);
+      })
+      .catch((err) => {
+        console.log(`Smth bad happened: ${err.toString()}`);
+        setImmediate(start);
+      });
+  }
+  start();
+}
+
+run(client);

@@ -1,6 +1,10 @@
 /* eslint-disable no-console */
 
+const Promise = require('bluebird');
 const redis = require('redis');
+const color = require('colors');
+
+Promise.promisifyAll(redis);
 
 const config = {
   port: 6379, // Port of your locally running Redis server
@@ -8,9 +12,9 @@ const config = {
 };
 
 const client = redis.createClient(config);
-client.set('active_gen', 'active', 'EX', 5);
+// client.set('active_gen', 'active', 'EX', 5);
 
-redis.prototype.appType = 'new_app';
+// redis.prototype.appType = 'new_app';
 
 /**
  * RANDOM STRING GENERATOR
@@ -41,7 +45,7 @@ function genIsValid(generator) {
   });
 }
 
-
+/*
 // const tToRun = 100000;
 const tToRun = 100;
 let i = 0;
@@ -59,3 +63,24 @@ const timerId = setInterval(() => {
   else { console.log(gen); }
 
 }, 500);
+*/
+
+client.client('list', (err, data) => {
+  let res = [];
+  const appQueue = [];
+  res = data.split(/\n(?!$)/); // new lines except ending line, coz its empty
+
+  for (let i = 0; i < res.length; i++) {
+    const temp =  res[i].split(/\b\s/); // spaces after words
+    // each res[i] contains a string with clients params
+    res[i] = temp;
+  }
+  for (let i = 0; i < res.length; i++) {
+    console.log(`[${i}] ClientID = ${res[i][0].split(/=/)[1]}, ClientName = ${res[i][3].split(/=/)[1]}`);
+    const temp = res[i][3].split(/=/)[1]; // get only our apps clients names prefixed with 'tester_'
+    if (temp.indexOf('tester_') + 1) appQueue.push(temp);
+  }
+  return appQueue;
+});
+// }
+
