@@ -72,7 +72,7 @@ function genIsValid(generator) {
  * increase 'generated' iterator in case we'll need it
  */
 function pActGenerator(generator) {
-  generator.setAsync('active_gen', 'active', 'EX', 2)
+  generator.setAsync('active_gen', 'active', 'EX', 3)
     .then(()=>{
       const message = newMessage(5);
       generator.rpushAsync('to_process', message);

@@ -6,7 +6,7 @@ const color = require('colors');
 
 Promise.promisifyAll(redis);
 
-const doLogging = false;
+let doLogging = false;
 
 const config = {
   port: 6379, // Port of Redis server
@@ -50,11 +50,13 @@ function newMessage(len) {
  * by default color = white
  */
 function colorLog(message, type) {
-  if (!doLogging) return 0;
-  if (type === undefined) console.log(`${message}`);
-  else if (type === 'generator') console.log(color.green(`${message}`));
-  else if (type === 'processor') console.log(color.blue(`${message}`));
-  else if (type === 'error') console.log(color.red(`${message}`));
+  if (doLogging) {
+    if (type === undefined) console.log(`${message}`);
+    else if (type === 'generator') console.log(color.green(`${message}`));
+    else if (type === 'processor') console.log(color.blue(`${message}`));
+    else if (type === 'error') console.log(color.red(`${message}`));
+  }
+  return 0;
 }
 
 /**
@@ -75,7 +77,7 @@ function genIsValid(generator) {
  * increase 'generated' iterator in case we'll need it
  */
 function pActGenerator(generator) {
-  return generator.setAsync('active_gen', 'active', 'EX', 2)
+  return generator.setAsync('active_gen', 'active', 'EX', 1)
     .then(()=>{
       const message = newMessage(5);
       generator.rpushAsync('to_process', message);
@@ -107,7 +109,7 @@ function pActProcessor(processor) {
             .then(()=>{ return Promise.resolve(); });
         }
         colorLog(`processed  + ${reply[1]}`, processor.myActionType);
-        processor.lpushAsync('processed', reply[1]).then(()=>{ return Promise.resolve(); });
+        return processor.lpushAsync('processed', reply[1]).then(()=>{ return Promise.resolve(); });
       });
   }).catch((err)=>{
     colorLog(`Error in actProcessor blocking POP ${err.toString()}`, 'error');
@@ -197,28 +199,39 @@ function wheel(client, timesToRun) {
     }).then(()=>{
       if (limitGen) {
         return client.getAsync('generated').then((gNum)=>{
-          if (gNum >= timesToRun) { clearInterval(repeater); return Promise.reject(new Error('tired to rock')); }
+          if (gNum >= timesToRun) {
+            clearInterval(repeater);
+            return Promise.reject(new Error('tired to rock')); }
+          return Promise.resolve();
         });
       }
       return Promise.resolve();
     })
       .then(() => {
-        repeater = setImmediate(hamster);
+        // repeater = setImmediate(hamster);
+        repeater = process.nextTick(hamster);
       })
       .catch((err) => {
         colorLog(`Look! An error: ${err.toString()}`, 'error');
         // setImmediate(hamster);
+        process.exit();
       });
   }
   hamster();
 }
 
-if (process.argv[2] === 'unlim') {
-  wheel(aClient);
+
+// don't forget to switch on the output;
+if (process.argv[2] !== undefined) {
+  doLogging = true;
+
+  if (isNaN(process.argv[2])) { wheel(aClient); }
+  else if (Number.parseInt(process.argv[2], 10) > 0) {
+    wheel(aClient, Number.parseInt(process.argv[2], 10));
+  }
+
 }
-else if (!Number.parseInt(process.argv[2], 10).isNaN && Number.parseInt(process.argv[2], 10) > 0 ) {
-  wheel(aClient, Number.parseInt(process.argv[2], 10));
-}
+
 
 module.exports.pActGenerator = pActGenerator;
 module.exports.pActProcessor = pActProcessor;
