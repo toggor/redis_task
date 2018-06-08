@@ -6,6 +6,8 @@ const color = require('colors');
 
 Promise.promisifyAll(redis);
 
+const doLogging = false;
+
 const config = {
   port: 6379, // Port of Redis server
   host: '127.0.0.1', // Redis server host
@@ -48,6 +50,7 @@ function newMessage(len) {
  * by default color = white
  */
 function colorLog(message, type) {
+  if (!doLogging) return 0;
   if (type === undefined) console.log(`${message}`);
   else if (type === 'generator') console.log(color.green(`${message}`));
   else if (type === 'processor') console.log(color.blue(`${message}`));
@@ -72,13 +75,14 @@ function genIsValid(generator) {
  * increase 'generated' iterator in case we'll need it
  */
 function pActGenerator(generator) {
-  generator.setAsync('active_gen', 'active', 'EX', 2)
+  return generator.setAsync('active_gen', 'active', 'EX', 2)
     .then(()=>{
       const message = newMessage(5);
       generator.rpushAsync('to_process', message);
       generator.setActionType('generator');
       colorLog(`message pushed ${message}`, generator.myActionType); })
     .then(generator.incrAsync('generated'))
+    .then(()=>{ return Promise.resolve(); })
     .catch((err)=>{
       colorLog(`Error in actGenerator ${err.toString()}`, 'error');
     });
@@ -92,17 +96,18 @@ function pActGenerator(generator) {
  * else we put a message into 'processed' queue
  */
 function pActProcessor(processor) {
-  processor.llenAsync('to_process').then((qsize)=>{  // check the 'to_process' queue not to block all clients
+  return processor.llenAsync('to_process').then((qsize)=>{  // check the 'to_process' queue not to block all clients
     if (qsize < 1) return Promise.resolve();
     return processor.blpopAsync('to_process', 0)
       .then((reply) => {
         processor.setActionType('processor');
         if (Math.random() >= 0.95) {
           colorLog(`Probability 5% triggered for ${reply[1]}`);
-          processor.lpushAsync('corrupted', reply[1]);
+          return processor.lpushAsync('corrupted', reply[1])
+            .then(()=>{ return Promise.resolve(); });
         }
         colorLog(`processed  + ${reply[1]}`, processor.myActionType);
-        processor.lpushAsync('processed', reply[1]);
+        processor.lpushAsync('processed', reply[1]).then(()=>{ return Promise.resolve(); });
       });
   }).catch((err)=>{
     colorLog(`Error in actProcessor blocking POP ${err.toString()}`, 'error');
@@ -151,6 +156,11 @@ function initApp(client) {
   client.clientAsync('setname', name); // a name for DB connection
 }
 
+aClient.on('quit', ()=>{
+  setTimeout(()=>{
+    process.exit();
+  }, 10000);
+});
 
 /**
  * int main (void).... almost
@@ -166,6 +176,7 @@ function initApp(client) {
  */
 function wheel(client, timesToRun) {
   let limitGen = false;
+  let repeater;
   if (Number.parseInt(timesToRun, 10) > 0) limitGen = true;
 
   initApp(client);
@@ -176,7 +187,7 @@ function wheel(client, timesToRun) {
       if (isActive) {
         if (client.myActionType === 'generator') {
           colorLog(`generator is ${isActive}`);
-          return Promise.delay(500).then(pActGenerator(client));
+          return Promise.delay(10).then(pActGenerator(client));  // changed for testing reasons
         }
         return pActProcessor(client);
       }
@@ -186,19 +197,29 @@ function wheel(client, timesToRun) {
     }).then(()=>{
       if (limitGen) {
         return client.getAsync('generated').then((gNum)=>{
-          if (gNum >= timesToRun) process.exit();
+          if (gNum >= timesToRun) { clearInterval(repeater); return Promise.reject(new Error('tired to rock')); }
         });
       }
+      return Promise.resolve();
     })
       .then(() => {
-        setImmediate(hamster);
+        repeater = setImmediate(hamster);
       })
       .catch((err) => {
         colorLog(`Look! An error: ${err.toString()}`, 'error');
-        setImmediate(hamster);
+        // setImmediate(hamster);
       });
   }
   hamster();
 }
 
-wheel(aClient);
+if (process.argv[2] === 'unlim') {
+  wheel(aClient);
+}
+else if (!Number.parseInt(process.argv[2], 10).isNaN && Number.parseInt(process.argv[2], 10) > 0 ) {
+  wheel(aClient, Number.parseInt(process.argv[2], 10));
+}
+
+module.exports.pActGenerator = pActGenerator;
+module.exports.pActProcessor = pActProcessor;
+module.exports.wheel = wheel;

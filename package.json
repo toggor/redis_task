@@ -16,10 +16,10 @@
     "eslint-plugin-standard": "^3.1.0",
     "mocha": "^5.2.0"
   },
-  "scripts": {    
-    "start" : "node ./app.js",
-    "getErrors" : "node ./getErrors.js",
-    "test": "node ./app.js"
+  "scripts": {
+    "start": "node ./app.js",
+    "getErrors": "node ./getErrors.js",
+    "test": "node ./node_modules/mocha/bin/mocha"
   },
   "repository": {
     "type": "git",
