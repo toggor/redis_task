@@ -19,7 +19,8 @@
   "scripts": {
     "start": "node ./app.js",
     "getErrors": "node ./getErrors.js",
-    "test": "node ./node_modules/mocha/bin/mocha"
+    "dev": "node ./node_modules/mocha/bin/mocha",
+    "test": "start npm run start 200 && npm run dev"
   },
   "repository": {
     "type": "git",
