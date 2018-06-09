@@ -2,88 +2,60 @@
 
 const Promise = require('bluebird');
 const redis = Promise.promisifyAll(require('redis'));
-const pActProcessor = require('../for_test.js').pActProcessor;
-const pActGenerator = require('../for_test.js').pActGenerator;
-const wheel = Promise.promisify(require('../for_test.js').wheel);
+const wheel = Promise.promisify(require('../app.js').wheel);
 
 
 const config = {
   port: 6379, // Port of Redis server
   host: '127.0.0.1', // Redis server host
 };
-const aClient = redis.createClient(config);
 
-function cleanBeforeRun(client) {
-  client.delAsync('to_process');
-  client.delAsync('generated');
-  client.delAsync('processed');
+const aClient = redis.createClient(config);
+const wheelClient = redis.createClient(config);
+
+function cleanRun(client) {
+  client.del('to_process');
+  client.del('generated');
+  client.del('processed');
 }
 
-aClient.setActionType = function setActionType(type) {
+wheelClient.setActionType = function setActionType(type) {
   this.myActionType = type;
 };
-aClient.setAppName = function setAppName(name) {
+wheelClient.setAppName = function setAppName(name) {
   this.appName = name;
 };
-/*
-describe('Generator', () => {
-  it('Generator should generate things', (done) => {
-    cleanBeforeRun(aClient);
-    pActGenerator(aClient).then(done).catch((err) => {
-      console.log(`Processing: ${err.toString()}`);
+
+
+describe('Main should generate', () => {
+
+  it('Main generates', (done) => {
+    aClient.get('generated', (err, result) => {
+      console.log(`Generated ${result} messages`);
+      if (result > 0) done();
+      else throw new Error('generates not');
     });
   });
 });
 
-
-describe('Processor', () => {
-  it('Processor should process', (done) => {
-    const expected = 0;
-    aClient.set('active_gen', 'active');
-    pActProcessor(aClient)
-      .then(aClient.del('active_gen'))
-      .then(done)
-      .catch((err) => {
-        console.log(`Processing: ${err.toString()}`);
-      });
-  });
-});
-
-
-describe('Main should generate', () => {
-  it('Main generates', (done) => {
-    const expected = 100;
-    wheel(aClient, expected)
-      .then(aClient.getAsync('generated'))
-      .then((gNum)=>{
-        console.log(`Generated ${gNum} messages`);
-        if (gNum >= expected) return Promise.resolve();
-        return Promise.reject(new Error('generated not enough'));
-      })
-      .then(done())
-      .catch((err) => {
-        console.log(`Main ${err.toString()}`);
-      });
-  });
-});
-*/
-
-describe('Main should generate', () => {
-  it('Main generates', (done) => {
-    const expected = 10;
-    wheel(aClient, 10);// .then(() =>{
-    return aClient.getAsync('generated')
-      .then((result)=>{
-        console.log(`Generated ${result} messages`);
-        if (result - expected >= 0) {
-          return Promise.resolve();
+describe('Main should process', () => {
+  it('Main process', (done) => {
+    function justDoIt() {
+      aClient.llen('processed', (err, result) => {
+        console.log(`Processed ${result} messages`);
+        if (result > 0) {
+          // aClient.del('active_gen');
+          cleanRun(aClient);
+          done();
         }
-        return Promise.reject(new Error('generated not enough'));
-      })
-      //.then(done())
-      .catch((err)=>{
-        console.log(`Main ${err.toString()}`);
-      })
+        else {
+          // aClient.del('active_gen');
+          cleanRun(aClient);
+          throw new Error('processes not');
+        }
+      });
+    }
+    wheel(wheelClient, 50);
+    setTimeout(justDoIt, 100);
   });
 });
-

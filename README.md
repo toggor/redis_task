@@ -18,5 +18,17 @@ Conditions:
 - Message is generated as a random text response from a function.
 
 ## Usage
+First app is a generator. If only one app is up - also a generator.
+All the rest are processors.
 
-`npm start`
+To start a normal app use:
+`npm start app`
+
+![Generator and processor](two_started_apps.png)
+
+For the sake of testing you can set a number of messages to generate
+`npm start n`
+where n is the number
+
+![Start N](start_n.png)
+
