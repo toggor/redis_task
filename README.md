@@ -31,5 +31,5 @@ For the sake of testing you can set a number of messages to generate
 where n is the number
 
 ![Start N](start_n.png)
-![Test ex](moacha_test.png)
+![Test ex](mocha_test.png)
 
