@@ -161,7 +161,7 @@ function appIsNext(client) {
       // res[i] = temp;
       // temp = res[i][3].split(/=/)[1]; // params look like 'name=cli_name', split on '='
       temp = temp[3].split(/=/)[1]; // params look like 'name=cli_name', split on '='
-      if (temp.indexOf('tester_') + 1) { cliQueue.push(temp); }// get only our apps clients names prefixed with 'tester_'
+      if (temp.indexOf(cliPrefix) + 1) { cliQueue.push(temp); } // get only our apps clients names prefixed with 'tester_'
     }
     return cliQueue;
   }).then((result)=>{
@@ -241,7 +241,12 @@ function wheel(client, timesToRun) {
 }
 
 
-// don't forget to switch on the output;
+/**
+ *  don't forget to switch on the output;
+ *  we don't mess around and accept only
+ *  'app', 'getError', or number of messages to generate
+ *  otherwise it won't start
+ */
 if (process.argv[2] !== undefined) {
   doLogging = true;
   if (isNaN(process.argv[2])) {
