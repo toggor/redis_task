@@ -77,10 +77,12 @@ function getErrors(client) {
       }
     })
     .then(()=> {
-      colorLog('Corrupted messages deleted');
+      colorLog('Deleting corrupted messages');
       return client.del('corrupted');
     })
+    .delay(2000)
     .then(()=> {
+      console.log('All deleted');
       process.exit(0);
     });
 }
@@ -198,7 +200,6 @@ function initApp(client) {
  */
 function wheel(client, timesToRun) {
   let limitGen = false;
-  let repeater;
   let msgsGenerated = 0;
   if (Number.parseInt(timesToRun, 10) > 0) limitGen = true;
 
@@ -209,13 +210,10 @@ function wheel(client, timesToRun) {
     genIsValid(client).then((isActive) => {
       if (isActive) {
         if (client.myActionType === 'generator') {
-          // colorLog(`generator is ${isActive}`);
           msgsGenerated++;
           if (limitGen && (msgsGenerated >= timesToRun)) {
-            clearInterval(repeater);
             return Promise.reject(new Error('tired to rock'));
           }
-          // colorLog(`Generated in this run ${msgsGenerated}`);
           return Promise.delay(10).then(pActGenerator(client));  // delay changed for testing reasons
         }
         return pActProcessor(client);
@@ -225,7 +223,7 @@ function wheel(client, timesToRun) {
       });
     })
       .then(() => {
-        repeater = process.nextTick(hamster);
+        process.nextTick(hamster);
         return Promise.resolve();
       })
       .catch((err) => {
